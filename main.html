@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>משחק סוללות וארגזים</title>
+    <!-- טעינת Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* הגדרת גופן אינטר (Inter) כברירת מחדל */
+        :root {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* סגנון כללי לגרירה בטלפון */
+        .dragging {
+            opacity: 0.7;
+            z-index: 1000;
+            cursor: grabbing;
+        }
+
+        /* סגנון לארגז כשהוא חורג מההספק */
+        .crate-overloaded {
+            animation: shake 0.5s;
+            background-color: #ef4444 !important; /* אדום בוהק יותר */
+            border: 4px solid #fca5a5;
+        }
+
+        /* אנימציה לרעידת הארגז */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+            20%, 40%, 60%, 80% { transform: translateX(5px); }
+        }
+
+        /* סגנון ספציפי לסוללה לגרירה קלה בנייד */
+        .battery-draggable {
+            touch-action: none; /* מונע גלילה בדפדפן כאשר נוגעים בסוללה */
+            cursor: grab;
+            transition: box-shadow 0.1s;
+            position: relative; /* חובה למיקום הכפתורים */
+        }
+        .battery-draggable:active {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
+        }
+
+        /* סגנון למיקום הסוללות בתוך הארגז */
+        .crate-content {
+            display: flex;
+            flex-wrap: wrap;
+            padding: 8px;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 4px;
+            min-height: 120px; /* גובה מינימלי להצגת הסוללות בפנים */
+        }
+    </style>
+</head>
+<body class="bg-gray-50 flex flex-col min-h-screen">
+
+    <!-- סקריפט Tailwind מיוחד לטעינת הגופנים -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'custom-red': '#ef4444',
+                        'custom-grey': '#9ca3af',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- כותרת ראשית -->
+    <header class="p-4 bg-white shadow-md text-center">
+        <h1 class="text-3xl font-extrabold text-indigo-700">מחשבון הספק סוללות לארגז 🔋📦</h1>
+        <p class="text-sm text-gray-500 mt-1">מגבלת הספק מקסימלית לארגז: 1.8kW (1800W)</p>
+    </header>
+
+    <!-- אזור הארגזים - בחלק העליון -->
+    <main id="crates-container" class="p-4 flex-grow flex flex-col items-center gap-6 bg-gray-100">
+        <!-- הארגזים יופיעו כאן -->
+    </main>
+    
+    <!-- פקדים להוספת ארגזים (מתחת לארגזים) -->
+    <section class="p-4 bg-gray-100 text-center">
+         <button id="add-crate-btn" class="bg-green-500 text-white font-bold py-2 px-4 rounded-full shadow-md hover:bg-green-600 transition duration-200">
+            + הוסף ארגז נוסף
+        </button>
+    </section>
+
+    <!-- מודאל גנרי להתראות ואישורים -->
+    <div id="custom-modal-container" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 items-center justify-center p-4">
+        <div id="custom-modal-content" class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full text-center" onclick="event.stopPropagation()">
+            <!-- התוכן יוכנס לכאן על ידי JS -->
+        </div>
+    </div>
+
+
+    <!-- אזור הסוללות הפנויות - בחלק התחתון -->
+    <section class="p-4 bg-gray-50">
+        <h2 class="text-xl font-bold mb-3 text-gray-700">סוללות פנויות (גרור לארגז)</h2>
+        <div id="batteries-list" class="flex flex-wrap gap-4 justify-center md:justify-start">
+            <!-- הסוללות יופיעו כאן -->
+        </div>
+    </section>
+    
+    <!-- אזור יצירת סוללות - בחלק התחתון החדש -->
+    <section class="p-4 bg-white border-t-4 border-indigo-500 shadow-2xl">
+        <h2 class="text-xl font-bold mb-3 text-indigo-700">🔨 יצירת סוללה חדשה</h2>
+        <div class="flex flex-wrap gap-4 mb-4 items-center">
+            
+            <!-- קלט שם סוללה -->
+            <div class="flex-1 min-w-[45%]">
+                <label for="batteryName" class="block text-sm font-medium text-gray-700">שם הסוללה (יופיע בכרטיס)</label>
+                <input type="text" id="batteryName" placeholder="לדוגמה: סוללה כחולה" class="mt-1 p-2 border border-gray-300 rounded-lg w-full text-center">
+            </div>
+
+            <!-- קלט קיבולת (mAh) -->
+            <div class="flex-1 min-w-[45%]">
+                <label for="amps" class="block text-sm font-medium text-gray-700">קיבולת זרם (mAh) - לחישוב הספק</label>
+                <input type="number" id="amps" value="10000" min="1" class="mt-1 p-2 border border-gray-300 rounded-lg w-full text-center">
+            </div>
+
+            <!-- קלט וולט (מתח) -->
+            <div class="flex-1 min-w-[45%]">
+                <label for="volts" class="block text-sm font-medium text-gray-700">וולט (V)</label>
+                <input type="number" id="volts" value="12" min="1" class="mt-1 p-2 border border-gray-300 rounded-lg w-full text-center">
+            </div>
+            
+            <!-- קלט אחוזי טעינה -->
+            <div class="flex-1 min-w-[45%]">
+                <label for="charge" class="block text-sm font-medium text-gray-700">אחוזי טעינה (%)</label>
+                <input type="range" id="charge" value="80" min="0" max="100" class="mt-1 w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                <span id="charge-value" class="text-sm text-center block text-gray-500">80%</span>
+            </div>
+
+            <!-- כפתור הוספת סוללה -->
+            <button id="add-battery-btn" class="w-full mt-4 bg-indigo-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:bg-indigo-600 transition duration-200 whitespace-nowrap">
+                + הוסף סוללה
+            </button>
+        </div>
+    </section>
+
+    
+    <footer></footer>
+
+    <script>
+        // --- קבועים גלובליים ---
+        let CRATES_DATA = [];
+        let BATTERIES_DATA = [];
+        let nextBatteryId = 1;
+        let nextCrateId = 1;
+        const MAX_POWER_W = 1800; // 1.8kW
+
+        // --- אלמנטים DOM ---
+        const cratesContainer = document.getElementById('crates-container');
+        const batteriesList = document.getElementById('batteries-list');
+        const addBatteryBtn = document.getElementById('add-battery-btn');
+        const addCrateBtn = document.getElementById('add-crate-btn');
+        const chargeRange = document.getElementById('charge');
+        const chargeValueSpan = document.getElementById('charge-value');
+        const customModalContainer = document.getElementById('custom-modal-container');
+        const customModalContent = document.getElementById('custom-modal-content');
+
+        // --- פונקציות עזר כלליות ---
+
+        /**
+         * Converts a string to a consistent HSL color (dark gray scale).
+         * @param {string} str - The string to hash
+         * @returns {string} - CSS HSL string in dark gray shades
+         */
+        function stringToHslColor(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            // Hue (H) is irrelevant for S=0, but kept for HSL format
+            const h = hash % 360; 
+            // Saturation (S) must be 0 for gray
+            const s = 0; 
+            // Lightness (L) varied between 25% and 45% (to keep it dark for white text)
+            const l = 25 + (hash % 21); // Range 25-45
+            
+            return `hsl(${h}, ${s}%, ${l}%)`;
+        }
+        
+        /**
+         * Displays a generic modal for alerts.
+         */
+        function showGenericModal(title, message, buttonsHtml) {
+            customModalContent.innerHTML = `
+                <h3 class="text-2xl font-bold text-gray-800 mb-4">${title}</h3>
+                <p class="text-gray-700 mb-6">${message}</p>
+                <div class="flex justify-center gap-4">
+                    ${buttonsHtml}
+                </div>
+            `;
+            customModalContainer.classList.remove('hidden');
+            customModalContainer.classList.add('flex');
+            
+            // Allows closing the modal by clicking the background (but not the content itself)
+            customModalContainer.onclick = function(e) {
+                if (e.target === customModalContainer) {
+                    customModalContainer.classList.add('hidden');
+                }
+            };
+        }
+
+        /**
+         * Displays a custom error or info alert.
+         */
+        function showCustomAlert(title, message, icon = 'ℹ️') {
+            const buttons = `<button onclick="document.getElementById('custom-modal-container').classList.add('hidden')" class="bg-indigo-500 text-white font-bold py-2 px-6 rounded-full hover:bg-indigo-600 transition duration-200">סגור</button>`;
+            showGenericModal(`${icon} ${title}`, message, buttons);
+        }
+
+        // --- Helper Functions ---
+
+        /**
+         * Calculates power (Watts)
+         * Converts mAh to A for calculation.
+         */
+        function calculatePower(mAh, V) {
+            const A = mAh / 1000; // Convert to Ampere (A)
+            return Math.round(A * V);
+        }
+
+        /**
+         * Converts capacity from mAh to Ah for display
+         */
+        function mAhToAh(mAh) {
+            return (mAh / 1000).toFixed(2);
+        }
+
+        // --- UI Component Creation ---
+
+        /**
+         * Creates the HTML element for a battery
+         */
+        function createBatteryElement(battery) {
+            const Ah = mAhToAh(battery.mAh); 
+            const chargeColor = battery.charge > 70 ? 'bg-green-300' : battery.charge > 30 ? 'bg-yellow-300' : 'bg-red-300';
+            const batteryEl = document.createElement('div');
+            
+            // Set background color based on the battery name (dark gray shades)
+            const backgroundColor = stringToHslColor(battery.name);
+            
+            batteryEl.id = 'battery-' + battery.id;
+            batteryEl.dataset.batteryId = battery.id;
+            batteryEl.draggable = true; // For desktop drag
+            // Use h-20 (80px) height and smaller text sizes
+            batteryEl.className = `battery-draggable w-32 h-20 p-2 rounded-xl shadow-lg transition duration-200 transform hover:scale-[1.03] flex flex-col justify-center items-center text-xs font-semibold select-none text-white`;
+            batteryEl.style.backgroundColor = backgroundColor; 
+            
+            // Use white text
+            batteryEl.innerHTML = `
+                <!-- Battery Name (text-base for better fit) -->
+                <div class="text-white text-base font-extrabold truncate max-w-full text-center" title="${battery.name}">${battery.name}</div>
+                <!-- Capacity (Ah) and Voltage (V) - text-xs -->
+                <div class="text-white text-xs">Ah: ${Ah} | V: ${battery.V}</div>
+                <div class="w-full h-2 rounded-full mt-1 overflow-hidden border border-gray-100">
+                    <div style="width: ${battery.charge}%;" class="h-full ${chargeColor}"></div>
+                </div>
+                <div class="text-white text-xs mt-0.5">${battery.charge}% טעינה</div>
+                
+                <!-- Buttons: Remove/Duplicate/Delete -->
+                ${battery.inCrate ? 
+                    // Remove button (X) - only inside a crate
+                    `<button onclick="removeBatteryFromCrate(${battery.id})" class="absolute top-1 right-1 text-white bg-black bg-opacity-40 rounded-full w-4 h-4 text-[10px] leading-3 p-0 hover:bg-opacity-60 transition duration-150" title="הוצא מהארגז">X</button>` :
+                    // Duplicate (++) and Delete (-) buttons - only in the free list
+                    `
+                    <button onclick="duplicateBattery(${battery.id})" class="absolute top-1 right-1 text-white bg-black bg-opacity-40 rounded-full w-5 h-5 text-[10px] leading-3 font-extrabold p-0 hover:bg-opacity-60 transition duration-150" title="שכפל סוללה">++</button>
+                    <button onclick="deleteBattery(${battery.id})" class="absolute top-1 left-1 text-white bg-black bg-opacity-40 rounded-full w-5 h-5 text-[10px] leading-3 font-extrabold p-0 hover:bg-opacity-60 transition duration-150" title="מחק סוללה">-</button>
+                    `
+                }
+            `;
+
+            // Add drag listeners (Desktop)
+            batteryEl.addEventListener('dragstart', handleDragStart);
+
+            // Add touch listeners (Mobile)
+            batteryEl.addEventListener('touchstart', handleTouchStart);
+            
+            return batteryEl;
+        }
+
+        /**
+         * Creates the HTML element for a crate
+         */
+        function createCrateElement(crate) {
+            const crateEl = document.createElement('div');
+            crateEl.id = 'crate-' + crate.id;
+            crateEl.dataset.crateId = crate.id;
+            crateEl.className = `crate-dropzone w-full max-w-sm p-4 rounded-xl shadow-xl bg-custom-red border-4 border-red-300`;
+            crateEl.innerHTML = `
+                <h2 class="text-xl font-bold text-white mb-2 text-center relative">
+                    ארגז סוללות #${crate.id}
+                    <!-- Delete Crate button -->
+                    <button onclick="deleteCrate(${crate.id})" class="absolute top-0 left-0 text-white bg-red-700 hover:bg-red-800 rounded-full w-6 h-6 flex items-center justify-center transition" title="מחק ארגז">
+                        🗑️
+                    </button>
+                </h2>
+                <div class="bg-red-700 text-white p-2 rounded-lg mb-2 flex justify-between">
+                    <span>🔋 סוללות: <span id="crate-count-${crate.id}">${crate.batteryCount}</span></span>
+                    <span>⚡ הספק נוכחי: <span id="crate-power-${crate.id}">${crate.currentPower}W</span></span>
+                </div>
+                <div id="crate-content-${crate.id}" class="crate-content bg-red-800 bg-opacity-20 rounded-lg border-2 border-dashed border-red-300 transition duration-300">
+                    <p class="text-red-300 text-center w-full text-sm">${crate.batteryCount === 0 ? 'גרור סוללות לכאן' : ''}</p>
+                </div>
+            `;
+
+            // Add drag listeners (Desktop)
+            crateEl.addEventListener('dragover', handleDragOver);
+            crateEl.addEventListener('drop', handleDrop);
+            
+            // Add touch listeners (Mobile)
+            crateEl.addEventListener('touchmove', (e) => e.preventDefault()); 
+            
+            return crateEl;
+        }
+
+
+        // --- Drag and Touch Logic ---
+
+        let draggedBatteryId = null;
+        let activeTouchBattery = null;
+        let initialX, initialY, currentTouchX, currentTouchY;
+
+        // Drag logic - Desktop
+        function handleDragStart(e) {
+            draggedBatteryId = e.target.dataset.batteryId;
+            e.dataTransfer.setData('batteryId', draggedBatteryId);
+            e.target.classList.add('opacity-50');
+        }
+        
+        // Drag logic - Desktop
+        cratesContainer.addEventListener('dragend', (e) => {
+             if (e.target.classList.contains('battery-draggable')) {
+                e.target.classList.remove('opacity-50');
+            }
+        });
+
+        function handleDragOver(e) {
+            e.preventDefault(); // Allows dropping
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            const batteryId = e.dataTransfer.getData('batteryId');
+            const crateId = e.currentTarget.dataset.crateId;
+            
+            if (batteryId && crateId) {
+                attemptMoveBatteryToCrate(parseInt(batteryId), parseInt(crateId));
+            }
+        }
+        
+        // Touch logic - Mobile
+        function handleTouchStart(e) {
+            if (e.touches.length === 1) {
+                // Check if a button (Remove, Duplicate, Delete) was clicked - if so, do not start drag
+                if (e.target.tagName === 'BUTTON') {
+                    return; 
+                }
+                
+                e.preventDefault(); // Prevents page scrolling
+                
+                activeTouchBattery = e.currentTarget;
+                draggedBatteryId = activeTouchBattery.dataset.batteryId;
+                
+                activeTouchBattery.classList.add('dragging');
+                
+                const rect = activeTouchBattery.getBoundingClientRect();
+                initialX = e.touches[0].clientX - rect.left;
+                initialY = e.touches[0].clientY - rect.top;
+                
+                document.addEventListener('touchmove', handleTouchMove);
+                document.addEventListener('touchend', handleTouchEnd);
+            }
+        }
+        
+        function handleTouchMove(e) {
+            if (activeTouchBattery) {
+                currentTouchX = e.touches[0].clientX;
+                currentTouchY = e.touches[0].clientY;
+                
+                // Set the battery position according to the touch
+                const newX = currentTouchX - initialX;
+                const newY = currentTouchY - initialY;
+
+                activeTouchBattery.style.position = 'fixed';
+                activeTouchBattery.style.left = newX + 'px';
+                activeTouchBattery.style.top = newY + 'px';
+            }
+        }
+
+        function handleTouchEnd(e) {
+            if (activeTouchBattery) {
+                document.removeEventListener('touchmove', handleTouchMove);
+                document.removeEventListener('touchend', handleTouchEnd);
+                
+                activeTouchBattery.classList.remove('dragging');
+                activeTouchBattery.style.position = '';
+                activeTouchBattery.style.left = '';
+                activeTouchBattery.style.top = '';
+
+                // Check for drop: Find the crate under the final touch position
+                const touchPoint = { clientX: currentTouchX || e.changedTouches[0].clientX, clientY: currentTouchY || e.changedTouches[0].clientY };
+                
+                const targetCrateEl = Array.from(document.querySelectorAll('.crate-dropzone')).find(crateEl => {
+                    const rect = crateEl.getBoundingClientRect();
+                    return touchPoint.clientX >= rect.left && 
+                           touchPoint.clientX <= rect.right &&
+                           touchPoint.clientY >= rect.top &&
+                           touchPoint.clientY <= rect.bottom;
+                });
+                
+                if (targetCrateEl) {
+                    const crateId = targetCrateEl.dataset.crateId;
+                    attemptMoveBatteryToCrate(parseInt(draggedBatteryId), parseInt(crateId));
+                }
+                
+                activeTouchBattery = null;
+                draggedBatteryId = null;
+                currentTouchX = null;
+                currentTouchY = null;
+            }
+        }
+
+
+        // --- Game State Update Logic ---
+        
+        /**
+         * Attempts to move a battery to a crate, including power limit check
+         */
+        function attemptMoveBatteryToCrate(batteryId, crateId) {
+            const battery = BATTERIES_DATA.find(b => b.id === batteryId);
+            const crate = CRATES_DATA.find(c => c.id === crateId);
+
+            if (!battery || !crate || battery.inCrate === crateId) return;
+
+            // 1. Overload Check
+            const newTotalPower = crate.currentPower + battery.W;
+            
+            if (newTotalPower > MAX_POWER_W) {
+                // Overload! Show alert and shake
+                showCustomAlert("🛑 חריגה מהספק מקסימלי!", `סך ההספק של הסוללות בארגז עובר את המגבלה (${MAX_POWER_W}W). נסה להוציא סוללות כדי להתאים!`, '🛑');
+                
+                const crateEl = document.getElementById('crate-' + crateId);
+                crateEl.classList.add('crate-overloaded');
+          
